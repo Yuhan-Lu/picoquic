@@ -32,7 +32,7 @@
  *    them on the appropriate socket.
  *
  * The Sample Client uses the "qlog" option to produce Quic Logs as defined
- * in https://datatracker.ietf.org/doc/draft-marx-qlog-event-definitions-quic-h3/.
+ * in https://urldefense.com/v3/__https://datatracker.ietf.org/doc/draft-marx-qlog-event-definitions-quic-h3/__;!!DZ3fjg!8W4v0WPn41N7vIqWpuy-t8Gl89ocd1TAAFoYX6ep3ak76hsO5B_ImpUBtymGirW_rYNhre_XmKndbwk60-NqcaPwep2s$ .
  * This is an optional feature, which requires linking with the "loglib" library,
  * and using the picoquic_set_qlog() API defined in "autoqlog.h". When a connection
  * completes, the code saves the log as a file named after the Initial Connection
@@ -47,6 +47,7 @@
 #include <autoqlog.h>
 #include <picoquic_packet_loop.h>
 #include "picoquic_sample.h"
+#include <sys/time.h>
 
  /* Client context and callback management:
   *
@@ -284,8 +285,14 @@ int sample_client_callback(picoquic_cnx_t* cnx,
                     client_ctx->nb_files_received++;
 
                     if ((client_ctx->nb_files_received + client_ctx->nb_files_failed) >= client_ctx->nb_files) {
-                        /* everything is done, close the connection */
+                        // everything is done, close the connection 
                         ret = picoquic_close(cnx, 0);
+                        printf("Time stop .... \n");
+                        struct timeval tv;
+
+                        gettimeofday(&tv, NULL);
+                        unsigned long long millisecondsSinceEpoch = (unsigned long long)(tv.tv_sec) * 1000 + (unsigned long long)(tv.tv_usec) / 1000;
+                        printf("%llu\n", millisecondsSinceEpoch);
                     }
                 }
             }
