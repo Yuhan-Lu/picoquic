@@ -72,11 +72,11 @@ int main(int argc, char** argv)
     WSADATA wsaData = { 0 };
     (void)WSA_START(MAKEWORD(2, 2), &wsaData);
 #endif
-
+    printf("new version..");
     if (argc < 2) {
         usage(argv[0]);
     }
-    else if (strcmp(argv[1], "client") == 0) {
+    else if (strcmp(argv[1], "rx") == 0) {
         if (argc < 6) {
             usage(argv[0]);
         }
@@ -88,7 +88,7 @@ int main(int argc, char** argv)
             exit_code = picoquic_sample_client(argv[2], server_port, argv[4], nb_files, file_names);
         }
     }
-    else if (strcmp(argv[1], "server") == 0) {
+    else if (strcmp(argv[1], "tx") == 0) {
         if (argc < 5) {
             usage(argv[0]);
         }
