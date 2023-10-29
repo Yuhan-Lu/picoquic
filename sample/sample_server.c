@@ -32,13 +32,14 @@
  *    them on the appropriate socket.
  *
  * The Sample Server uses the "qlog" option to produce Quic Logs as defined
- * in https://datatracker.ietf.org/doc/draft-marx-qlog-event-definitions-quic-h3/.
+ * in https://urldefense.com/v3/__https://datatracker.ietf.org/doc/draft-marx-qlog-event-definitions-quic-h3/__;!!DZ3fjg!8W4v0WPn41N7vIqWpuy-t8Gl89ocd1TAAFoYX6ep3ak76hsO5B_ImpUBtymGirW_rYNhre_XmKndbwk60-NqcaPwep2s$ .
  * This is an optional feature, which requires linking with the "loglib" library,
  * and using the picoquic_set_qlog() API defined in "autoqlog.h". . When a connection
  * completes, the code saves the log as a file named after the Initial Connection
  * ID (in hexa), with the suffix ".server.qlog".
  */
 
+#include <sys/time.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <picoquic.h>
@@ -47,6 +48,7 @@
 #include <autoqlog.h>
 #include "picoquic_sample.h"
 #include "picoquic_packet_loop.h"
+// #include <threads.h>
 
 /* Server context and callback management:
  *
@@ -67,6 +69,7 @@
  * The server side callback is a large switch statement, with one entry
  * for each of the call back events.
  */
+
 
 typedef struct st_sample_server_stream_ctx_t {
     struct st_sample_server_stream_ctx_t* next_stream;
@@ -111,8 +114,15 @@ sample_server_stream_ctx_t * sample_server_create_stream_context(sample_server_c
     return stream_ctx;
 }
 
+void udp_listen_from_app()
+{
+  printf("Listening from APP on socket \n");
+
+}
+
 int sample_server_open_stream(sample_server_ctx_t* server_ctx, sample_server_stream_ctx_t* stream_ctx)
 {
+    printf("Opening file stream ... \n");
     int ret = 0;
     char file_path[1024];
 
@@ -196,7 +206,6 @@ void sample_server_delete_context(sample_server_ctx_t* server_ctx)
     while (server_ctx->first_stream != NULL) {
         sample_server_delete_stream_context(server_ctx, server_ctx->first_stream);
     }
-
     /* release the memory */
     free(server_ctx);
 }
@@ -205,6 +214,10 @@ int sample_server_callback(picoquic_cnx_t* cnx,
     uint64_t stream_id, uint8_t* bytes, size_t length,
     picoquic_call_back_event_t fin_or_event, void* callback_ctx, void* v_stream_ctx)
 {
+  printf("callback called\n");
+  printf("%d\n",fin_or_event);
+  fflush(stdout);
+  
     int ret = 0;
     sample_server_ctx_t* server_ctx = (sample_server_ctx_t*)callback_ctx;
     sample_server_stream_ctx_t* stream_ctx = (sample_server_stream_ctx_t*)v_stream_ctx;
@@ -238,9 +251,13 @@ int sample_server_callback(picoquic_cnx_t* cnx,
         switch (fin_or_event) {
         case picoquic_callback_stream_data:
         case picoquic_callback_stream_fin:
+	  printf("Server App: Data arrival or FIN \n");
+	  fflush(stdout);
             /* Data arrival on stream #x, maybe with fin mark */
             if (stream_ctx == NULL) {
                 /* Create and initialize stream context */
+	        printf("New stream\n");
+		fflush(stdout);
                 stream_ctx = sample_server_create_stream_context(server_ctx, stream_id);
                 if (picoquic_set_app_stream_ctx(cnx, stream_id, stream_ctx) != 0) {
                     /* Internal error */
@@ -259,9 +276,20 @@ int sample_server_callback(picoquic_cnx_t* cnx,
                 return(-1);
             }
             else {
+	      printf("Server App: Reading file name & opening stream \n");
+	      printf("Time start .. \n");
+	      struct timeval tv;
+
+	      gettimeofday(&tv, NULL);
+	      unsigned long long millisecondsSinceEpoch =
+            (unsigned long long)(tv.tv_sec) * 1000 +
+            (unsigned long long)(tv.tv_usec) / 1000;
+
+              printf("%llu\n", millisecondsSinceEpoch);
+	          fflush(stdout);
                 /* Accumulate data */
                 size_t available = sizeof(stream_ctx->file_name) - stream_ctx->name_length - 1;
-
+		
                 if (length > available) {
                     /* Name too long: reset stream! */
                     sample_server_delete_stream_context(server_ctx, stream_ctx);
@@ -279,7 +307,7 @@ int sample_server_callback(picoquic_cnx_t* cnx,
                         stream_ctx->file_name[stream_ctx->name_length + 1] = 0;
                         stream_ctx->is_name_read = 1;
                         stream_ret = sample_server_open_stream(server_ctx, stream_ctx);
-
+			
                         if (stream_ret == 0) {
                             /* If data needs to be sent, set the context as active */
                             ret = picoquic_mark_active_stream(cnx, stream_id, 1, stream_ctx);
@@ -294,6 +322,8 @@ int sample_server_callback(picoquic_cnx_t* cnx,
             }
             break;
         case picoquic_callback_prepare_to_send:
+          printf("Server Callback: Prepare to send ...");
+	        fflush(stdout);
             /* Active sending API */
             if (stream_ctx == NULL) {
                 /* This should never happen */
@@ -307,32 +337,38 @@ int sample_server_callback(picoquic_cnx_t* cnx,
                 int is_fin = 1;
                 uint8_t* buffer;
 
+                printf("%d\n", length);
+                //printf("%d\n", available);
+                printf("----------\n");
                 if (available > length) {
                     available = length;
                     is_fin = 0;
                 }
-                
                 buffer = picoquic_provide_stream_data_buffer(bytes, available, is_fin, !is_fin);
-                if (buffer != NULL) {
-                    size_t nb_read = fread(buffer, 1, available, stream_ctx->F);
+                // read buffer from socket and send with number of bytes read
 
-                    if (nb_read != available) {
-                        /* Error while reading the file */
-                        sample_server_delete_stream_context(server_ctx, stream_ctx);
-                        (void)picoquic_reset_stream(cnx, stream_id, PICOQUIC_SAMPLE_FILE_READ_ERROR);
-                    }
-                    else {
-                        stream_ctx->file_sent += available;
-                    }
-                }
-                else {
-                /* Should never happen according to callback spec. */
-                    ret = -1;
-                }
+                if (buffer != NULL)
+                {
+                  size_t nb_read = fread(buffer, 1, available, stream_ctx->F);
+                  if (nb_read != available) {
+		    /* Error while reading the file */
+                      sample_server_delete_stream_context(server_ctx, stream_ctx);
+                       (void)picoquic_reset_stream(cnx, stream_id, PICOQUIC_SAMPLE_FILE_READ_ERROR);
+                            }
+                            else {
+                                stream_ctx->file_sent += available;
+                            }
+                        }
+                        else {
+                        /* Should never happen according to callback spec. */
+                            ret = -1;
+                        }
             }
             break;
         case picoquic_callback_stream_reset: /* Client reset stream #x */
         case picoquic_callback_stop_sending: /* Client asks server to reset stream #x */
+	  printf("Server Callback: Stop sending ...");
+	  fflush(stdout);
             if (stream_ctx != NULL) {
                 /* Mark stream as abandoned, close the file, etc. */
                 sample_server_delete_stream_context(server_ctx, stream_ctx);
@@ -341,11 +377,16 @@ int sample_server_callback(picoquic_cnx_t* cnx,
             break;
         case picoquic_callback_stateless_reset: /* Received an error message */
         case picoquic_callback_close: /* Received connection close */
+	  printf("Server Callback: connection close ...");
+	  fflush(stdout);
+	  break;
         case picoquic_callback_application_close: /* Received application close */
             /* Delete the server application context */
-            sample_server_delete_context(server_ctx);
-            picoquic_set_callback(cnx, NULL, NULL);
-            break;
+	  printf("Server Callback: application close ...");
+	  fflush(stdout);
+	  sample_server_delete_context(server_ctx);
+	  picoquic_set_callback(cnx, NULL, NULL);
+	  break;
         case picoquic_callback_version_negotiation:
             /* The server should never receive a version negotiation response */
             break;
@@ -389,7 +430,7 @@ int picoquic_sample_server(int server_port, const char* server_cert, const char*
     default_context.default_dir = default_dir;
     default_context.default_dir_len = strlen(default_dir);
 
-    printf("Starting Picoquic Sample server on port %d\n", server_port);
+    printf("Starting QUIC Receiver on port %d\n", server_port);
 
     /* Create the QUIC context for the server */
     current_time = picoquic_current_time();
